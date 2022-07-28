@@ -7,18 +7,17 @@ OPTIONS = {
     "fishing_rod_hotkey": "+",
 }
 
-# REGION = (494, 860, 532, 1)
-REGION = (520, 848, 556, 1)
 LINE_COLOR = (255, 105, 105)
 FISH_COLOR = (255, 255, 255)
 
+Region = None
 Count = 0
 kboard = Controller()
 
 
 def locateFishAndLinePoints():
     line, catch = None, None
-    pic = pyautogui.screenshot(region=REGION)
+    pic = pyautogui.screenshot(region=Region)
     for x in range(0, pic.width):
         color = pic.getpixel((x, 0))
         if line is None and color == LINE_COLOR:
@@ -31,17 +30,17 @@ def locateFishAndLinePoints():
 
 
 def throwBait():
-    time.sleep(0.3)
+    pyautogui.sleep(0.3)
     pyautogui.mouseDown()
-    time.sleep(0.3)
+    pyautogui.sleep(0.3)
     pyautogui.mouseUp()
-    time.sleep(1.5)
+    pyautogui.sleep(1.5)
 
 
 def rethrowBait():
-    time.sleep(0.5)
+    pyautogui.sleep(0.5)
     kboard.tap(OPTIONS["fishing_rod_hotkey"])
-    time.sleep(0.5)
+    pyautogui.sleep(0.5)
     kboard.tap(OPTIONS["fishing_rod_hotkey"])
     throwBait()
 
@@ -49,7 +48,7 @@ def rethrowBait():
 def preventKickAFK():
     global Count
     pyautogui.move(100 if Count % 2 == 0 else -100, 0, 1, pyautogui.easeOutQuad)
-    time.sleep(0.1)
+    pyautogui.sleep(0.1)
 
 
 def log(value) -> None:
@@ -57,9 +56,14 @@ def log(value) -> None:
 
 
 def main():
-    global Count
+    global Count, Region
+    calibrate()
+    if Region is None:
+        log("COULD NOT CALIBRATE, BAR WAS NOT FOUND!")
+        return
+    log("SUCCESSFULLY CALIBRATED!")
     lastTriggerTime = datetime.now()
-    log("INITIALIZED SCRIPT, WAITING FOR FIRST CATCH TO APPEAR!")
+    log("SCRIPT INITIALIZED, WAITING FOR FIRST CATCH TO APPEAR!")
     while True:
         line, catch = locateFishAndLinePoints()
         if (line, catch) != (None, None):
@@ -84,7 +88,30 @@ def main():
             lastTriggerTime = datetime.now()
             log("RE-THROWING BAIT!")
             rethrowBait()
-        time.sleep(0.1)
+        pyautogui.sleep(0.1)
+
+
+def calibrate():
+    global Region
+    s = pyautogui.screenshot()
+    lx, ly, linemiddle = None, None, None
+    for x in range(s.width):
+        for y in range(s.height):
+            if s.getpixel((x, y)) == LINE_COLOR:
+                lx, ly = x, y
+                break
+        if (lx, ly) != (None, None):
+            break
+    if (lx, ly) == (None, None):
+        return
+    for y in range(ly, s.height):
+        if s.getpixel((lx, y)) != LINE_COLOR:
+            linemiddle = ly + (y-ly) // 2.7
+            break
+    for x in range(lx, s.width):
+        if s.getpixel((x, ly)) == (255, 255, 255):
+            Region = (lx, linemiddle, x - lx, 1)
+            break
 
 
 if __name__ == '__main__':
