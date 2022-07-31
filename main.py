@@ -1,7 +1,8 @@
-import threading
 import pyautogui
+import multiprocessing
+from tkinter import *
 from datetime import datetime
-from pynput.keyboard import Controller as Keyboard, Listener, Key
+from pynput.keyboard import Controller as Keyboard
 
 LINE_COLOR: tuple[int, int, int] = (255, 105, 105)
 FISH_COLOR: tuple[int, int, int] = (255, 255, 255)
@@ -63,10 +64,10 @@ def throwBait() -> None:
     pyautogui.sleep(1.5)
 
 
-def rethrowBait() -> None:
+def rethrowBait(rodhotkey) -> None:
     for i in range(2):
         pyautogui.sleep(0.5)
-        KBoard.tap("+")
+        KBoard.tap(rodhotkey)
     throwBait()
 
 
@@ -81,13 +82,13 @@ def log(value) -> None:
     print(f"({datetime.now().strftime('%H:%M:%S')}) {value}")
 
 
-def main() -> None:
+def main(rodhotkey) -> None:
     global Count, Region
 
     log("SCRIPT INITIALIZED, WAITING FOR FIRST CATCH APPEARANCE FOR CALIBRATING!")
     timeStarted = datetime.now()
     while not calibrate():
-        if (datetime.now() - timeStarted).total_seconds() >= 5:
+        if (datetime.now() - timeStarted).total_seconds() >= 30:
             log("COULD NOT CALIBRATE, BAR WAS NOT FOUND!")
             return
     pyautogui.moveTo(Region[0], Region[1])
@@ -117,7 +118,7 @@ def main() -> None:
         if (datetime.now() - lastTriggerTime).total_seconds() >= 30:
             lastTriggerTime = datetime.now()
             log("RE-THROWING BAIT!")
-            rethrowBait()
+            rethrowBait(rodhotkey)
         pyautogui.sleep(0.1)
 
 
@@ -146,17 +147,68 @@ def calibrate() -> bool:
 
 
 if __name__ == '__main__':
-    thM = threading.Thread(target=main)
-    thM.daemon = True
-    thM.start()
 
-    def on_press(key):
-        if type(key) == Key:
-            if key == Key.end:
-                log("PROGRAM ENDED DUE TO PRESSING \"END\" KEY!")
-                return False
+    thM = None
 
-    thL = Listener(on_press=on_press)
-    thL.start()
-    while thM.is_alive() and thL.is_alive():
-        pyautogui.sleep(0.1)
+    root = Tk()
+    root.title("FishBot")
+    root.geometry("600x600")
+    root.iconbitmap('icon.ico')
+    root.minsize(400, 400)
+
+
+    def segoe(size):
+        return "Segoe UI", size
+
+
+    def start():
+        global thM
+        if thM is None or not thM.is_alive():
+            thM = multiprocessing.Process(target=main, args=(rodKeyValue.get(),))
+            thM.daemon = True
+            thM.start()
+            startBtn["text"] = "Stop"
+            startBtn["bg"] = "#ff0000"
+            for child in settingsFrame.winfo_children():
+                child["state"] = "disabled"
+        else:
+            thM.terminate()
+            thM = None
+            startBtn["text"] = "Start"
+            startBtn["bg"] = "#00ff00"
+            for child in settingsFrame.winfo_children():
+                child["state"] = "normal"
+
+
+    def checkLen(*args):
+        value = rodKeyValue.get()
+        if len(value) > 1:
+            rodKeyValue.set(value[:1])
+
+
+    title = Label(root, text="FishBot", font=("Segoe UI", 50))
+    title.pack()
+
+    author = Label(root, text="Made by Kr4zyM4nJ", font=("Segoe UI", 10))
+    author.pack()
+
+    settingsFrame = LabelFrame(root, text="Settings", )
+    settingsFrame.grid_columnconfigure(0, weight=1)
+    settingsFrame.grid_columnconfigure(1, weight=1)
+    settingsFrame.pack(fill="x", padx=10, pady=(0, 10), ipady=5)
+
+    rodKeyLabel = Label(settingsFrame, text="Fishing rod slot: ")
+    rodKeyLabel.grid(row=0, column=0)
+
+    rodKeyValue = StringVar(value="ě")
+    rodKeyValue.trace('w', checkLen)
+    rodKey = Entry(settingsFrame, width=10, justify="center", textvariable=rodKeyValue)
+    rodKey.grid(row=0, column=1)
+
+    startBtn = Button(root, text="Start", font=("Segoe UI", 20), bg="#00ff00", command=start)
+    startBtn.pack(fill="x", padx=10)
+
+    statusBar = Label(root, text="", font=("Segoe UI", 10))
+    statusBar.pack()
+
+    root.mainloop()
