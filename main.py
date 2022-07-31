@@ -1,6 +1,7 @@
+import threading
 import pyautogui
 from datetime import datetime
-from pynput.keyboard import Controller as Keyboard
+from pynput.keyboard import Controller as Keyboard, Listener, Key
 
 LINE_COLOR: tuple[int, int, int] = (255, 105, 105)
 FISH_COLOR: tuple[int, int, int] = (255, 255, 255)
@@ -28,7 +29,8 @@ class LineData:
 
 def getRarityName(color) -> str:
     def a(cl1, cl2) -> int:
-        return sum([abs(c1-c2) for c1, c2 in zip(cl1, cl2)])
+        return sum([abs(c1 - c2) for c1, c2 in zip(cl1, cl2)])
+
     differences = [
         [a(color, known_color), known_name]
         for known_name, known_color in RARITY_COLORS.items()
@@ -47,7 +49,7 @@ def locateFishAndLinePoints() -> LineData:
         elif catch is None and color == FISH_COLOR:
             catch = x
             catchtype = "treasure" if pic.getpixel((x + 4, 0)) != FISH_COLOR else "fish"
-            rarity = getRarityName(pic.getpixel((x-5, 0)))
+            rarity = getRarityName(pic.getpixel((x - 5, 0)))
         if catch is not None and line is not None:
             break
     return LineData(line, catch, catchtype, rarity)
@@ -70,7 +72,8 @@ def rethrowBait() -> None:
 
 def preventKickAFK() -> None:
     global Count
-    pyautogui.moveTo(x=Region[0] if Count % 2 == 0 else Region[0]+Region[2], y=Region[1], duration=1, tween=pyautogui.easeOutQuad)
+    pyautogui.moveTo(x=Region[0] if Count % 2 == 0 else Region[0] + Region[2], y=Region[1], duration=1,
+                     tween=pyautogui.easeOutQuad)
     pyautogui.sleep(0.1)
 
 
@@ -84,14 +87,12 @@ def main() -> None:
     log("SCRIPT INITIALIZED, WAITING FOR FIRST CATCH APPEARANCE FOR CALIBRATING!")
     timeStarted = datetime.now()
     while not calibrate():
-        if (datetime.now() - timeStarted).total_seconds() >= 30:
+        if (datetime.now() - timeStarted).total_seconds() >= 5:
             log("COULD NOT CALIBRATE, BAR WAS NOT FOUND!")
             return
-
     pyautogui.moveTo(Region[0], Region[1])
     log("SUCCESSFULLY CALIBRATED!")
     lastTriggerTime = datetime.now()
-
     while True:
         data = locateFishAndLinePoints()
         if (data.line, data.catch) != (None, None):
@@ -145,4 +146,17 @@ def calibrate() -> bool:
 
 
 if __name__ == '__main__':
-    main()
+    thM = threading.Thread(target=main)
+    thM.daemon = True
+    thM.start()
+
+    def on_press(key):
+        if type(key) == Key:
+            if key == Key.end:
+                log("PROGRAM ENDED DUE TO PRESSING \"END\" KEY!")
+                return False
+
+    thL = Listener(on_press=on_press)
+    thL.start()
+    while thM.is_alive() and thL.is_alive():
+        pyautogui.sleep(0.1)
