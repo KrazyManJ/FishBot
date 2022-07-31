@@ -1,3 +1,4 @@
+from idlelib.tooltip import Hovertip
 import pyautogui
 import multiprocessing
 from tkinter import *
@@ -56,7 +57,7 @@ def locateFishAndLinePoints() -> LineData:
     return LineData(line, catch, catchtype, rarity)
 
 
-def throwBait() -> None:
+def castRod() -> None:
     pyautogui.sleep(0.3)
     pyautogui.mouseDown()
     pyautogui.sleep(0.3)
@@ -64,11 +65,11 @@ def throwBait() -> None:
     pyautogui.sleep(1.5)
 
 
-def rethrowBait(rodhotkey) -> None:
+def castRodAgain(rodhotkey) -> None:
     for i in range(2):
         pyautogui.sleep(0.5)
         KBoard.tap(rodhotkey)
-    throwBait()
+    castRod()
 
 
 def preventKickAFK() -> None:
@@ -78,27 +79,24 @@ def preventKickAFK() -> None:
     pyautogui.sleep(0.1)
 
 
-def log(value) -> None:
-    print(f"({datetime.now().strftime('%H:%M:%S')}) {value}")
+def main(processdata) -> None:
+    def updateStatus(value):
+        processdata["status"] = value
 
-
-def main(rodhotkey) -> None:
     global Count, Region
-
-    log("SCRIPT INITIALIZED, WAITING FOR FIRST CATCH APPEARANCE FOR CALIBRATING!")
+    updateStatus("Waiting for first catch to appear for calibration...")
     timeStarted = datetime.now()
     while not calibrate():
         if (datetime.now() - timeStarted).total_seconds() >= 30:
-            log("COULD NOT CALIBRATE, BAR WAS NOT FOUND!")
+            updateStatus("Error: Could not calibrate because bar was not found, script stopped!")
             return
     pyautogui.moveTo(Region[0], Region[1])
-    log("SUCCESSFULLY CALIBRATED!")
     lastTriggerTime = datetime.now()
     while True:
+        updateStatus("Waiting for another fish...")
         data = locateFishAndLinePoints()
         if (data.line, data.catch) != (None, None):
-            log(f"STARTED FISHING!")
-            log(f"{data.rarity} {data.catchtype}")
+            updateStatus(f"Fishing {data.rarity} {data.catchtype}...")
             lastTriggerTime = datetime.now()
             while True:
                 data = locateFishAndLinePoints()
@@ -110,15 +108,14 @@ def main(rodhotkey) -> None:
                     pyautogui.mouseUp()
             pyautogui.mouseUp()
             Count += 1
-            log("FINISHED FISHING!")
+            updateStatus("Preventick AFK-Kick...")
             preventKickAFK()
-            log("AFK-KICK PREVENTED!")
-            throwBait()
-            log("BAIT THROWN!")
+            updateStatus("Casting fishing rod...")
+            castRod()
         if (datetime.now() - lastTriggerTime).total_seconds() >= 30:
             lastTriggerTime = datetime.now()
-            log("RE-THROWING BAIT!")
-            rethrowBait(rodhotkey)
+            updateStatus("No fish for a long time, casting fishing rod again...")
+            castRodAgain(processdata["rod_key"])
         pyautogui.sleep(0.1)
 
 
@@ -148,36 +145,38 @@ def calibrate() -> bool:
 
 if __name__ == '__main__':
 
-    thM = None
-
     root = Tk()
     root.title("FishBot")
     root.geometry("600x600")
     root.iconbitmap('icon.ico')
     root.minsize(400, 400)
 
+    thM: None | multiprocessing.Process = None
+    manager = multiprocessing.Manager()
+    MPData = manager.dict()
+    MPData["status"] = ""
+    status = StringVar()
 
-    def segoe(size):
-        return "Segoe UI", size
+
+    def toggleButton(state: bool) -> None:
+        startBtn["text"] = "Start" if state else "Stop"
+        startBtn["bg"] = "#00ff00" if state else "#ff0000"
+        for child in settingsFrame.winfo_children():
+            child["state"] = "normal" if state else "disabled"
 
 
-    def start():
+    def startBTNClick():
         global thM
         if thM is None or not thM.is_alive():
-            thM = multiprocessing.Process(target=main, args=(rodKeyValue.get(),))
-            thM.daemon = True
+            MPData["rod_key"] = rodKeyValue.get()
+            thM = multiprocessing.Process(target=main, args=(MPData,), daemon=True)
             thM.start()
-            startBtn["text"] = "Stop"
-            startBtn["bg"] = "#ff0000"
-            for child in settingsFrame.winfo_children():
-                child["state"] = "disabled"
+            toggleButton(False)
         else:
             thM.terminate()
             thM = None
-            startBtn["text"] = "Start"
-            startBtn["bg"] = "#00ff00"
-            for child in settingsFrame.winfo_children():
-                child["state"] = "normal"
+            toggleButton(True)
+            MPData["status"] = "Stopped script!"
 
 
     def checkLen(*args):
@@ -192,23 +191,35 @@ if __name__ == '__main__':
     author = Label(root, text="Made by Kr4zyM4nJ", font=("Segoe UI", 10))
     author.pack()
 
-    settingsFrame = LabelFrame(root, text="Settings", )
+    settingsFrame = LabelFrame(root, text="Settings (Hover for description)", )
     settingsFrame.grid_columnconfigure(0, weight=1)
     settingsFrame.grid_columnconfigure(1, weight=1)
     settingsFrame.pack(fill="x", padx=10, pady=(0, 10), ipady=5)
 
     rodKeyLabel = Label(settingsFrame, text="Fishing rod slot: ")
     rodKeyLabel.grid(row=0, column=0)
+    rodKeyTip = Hovertip(rodKeyLabel, """
+When fish didn't appear for while (usually it is because of lag and
+character somehow didn't cast a fishing rod), character will automatically
+try to re-switch tool.
+    """.strip())
 
     rodKeyValue = StringVar(value="ě")
     rodKeyValue.trace('w', checkLen)
     rodKey = Entry(settingsFrame, width=10, justify="center", textvariable=rodKeyValue)
     rodKey.grid(row=0, column=1)
 
-    startBtn = Button(root, text="Start", font=("Segoe UI", 20), bg="#00ff00", command=start)
-    startBtn.pack(fill="x", padx=10)
+    startBtn = Button(root, text="Start", font=("Segoe UI", 20), bg="#00ff00", command=startBTNClick)
+    startBtn.pack(fill="x", padx=10, pady=(0, 5))
 
-    statusBar = Label(root, text="", font=("Segoe UI", 10))
-    statusBar.pack()
+    statusFrame = LabelFrame(root, text="Status", labelanchor="n")
+    statusFrame.pack(fill="x", padx=10, ipady=5)
+    statusText = Label(statusFrame, textvariable=status, font=("Segoe UI", 10))
+    statusText.pack()
 
-    root.mainloop()
+    while 1:
+        if thM is None or not thM.is_alive():
+            if startBtn["text"] == "Stop":
+                toggleButton(True)
+        status.set(MPData["status"])
+        root.update()
