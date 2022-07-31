@@ -9,7 +9,6 @@ LINE_COLOR: tuple[int, int, int] = (255, 105, 105)
 FISH_COLOR: tuple[int, int, int] = (255, 255, 255)
 
 Region: tuple[int, int, int, int] | None = None
-Count: int = 0
 KBoard: Keyboard = Keyboard()
 
 RARITY_COLORS = {
@@ -72,18 +71,21 @@ def castRodAgain(rodhotkey) -> None:
     castRod()
 
 
-def preventKickAFK() -> None:
-    global Count
-    pyautogui.moveTo(x=Region[0] if Count % 2 == 0 else Region[0] + Region[2], y=Region[1], duration=1,
+def preventKickAFK(toggler) -> None:
+    pyautogui.moveTo(x=Region[0] if toggler else Region[0] + Region[2], y=Region[1], duration=1,
                      tween=pyautogui.easeOutQuad)
     pyautogui.sleep(0.1)
 
+# delta = datetime.datetime.now() - TimeStarted
+#                 s = delta.seconds
+#                 print(f"Time elapsed: {'{:02}:{:02}:{:02}'.format(s // 3600, s % 3600 // 60, s % 60)}")
 
 def main(processdata) -> None:
     def updateStatus(value):
         processdata["status"] = value
 
-    global Count, Region
+    global Region
+    timeStarted = datetime.now()
     updateStatus("Waiting for first catch to appear for calibration...")
     timeStarted = datetime.now()
     while not calibrate():
@@ -107,9 +109,9 @@ def main(processdata) -> None:
                 else:
                     pyautogui.mouseUp()
             pyautogui.mouseUp()
-            Count += 1
+            processdata["catchamount"] += 1
             updateStatus("Preventick AFK-Kick...")
-            preventKickAFK()
+            preventKickAFK(processdata["catchamount"] % 2 == 0)
             updateStatus("Casting fishing rod...")
             castRod()
         if (datetime.now() - lastTriggerTime).total_seconds() >= 30:
@@ -155,8 +157,10 @@ if __name__ == '__main__':
     manager = multiprocessing.Manager()
     MPData = manager.dict()
     MPData["status"] = ""
+    MPData["timeelapsed"] = "00:00:00"
+    MPData["catchamount"] = 0
     status = StringVar()
-
+    timeStarted: None | datetime = None
 
     def toggleButton(state: bool) -> None:
         startBtn["text"] = "Start" if state else "Stop"
@@ -166,17 +170,19 @@ if __name__ == '__main__':
 
 
     def startBTNClick():
-        global thM
+        global thM,timeStarted
         if thM is None or not thM.is_alive():
             MPData["rod_key"] = rodKeyValue.get()
             thM = multiprocessing.Process(target=main, args=(MPData,), daemon=True)
             thM.start()
             toggleButton(False)
+            timeStarted = datetime.now()
         else:
             thM.terminate()
             thM = None
             toggleButton(True)
-            MPData["status"] = "Stopped script!"
+            MPData["status"] = "Script stopped!"
+            timeStarted = None
 
 
     def checkLen(*args):
@@ -189,37 +195,56 @@ if __name__ == '__main__':
     title.pack()
 
     author = Label(root, text="Made by Kr4zyM4nJ", font=("Segoe UI", 10))
-    author.pack()
+    author.pack(pady=(0, 10))
 
-    settingsFrame = LabelFrame(root, text="Settings (Hover for description)", )
+    settingsFrame = LabelFrame(root, text="Settings (Hover for description)", labelanchor="n")
     settingsFrame.grid_columnconfigure(0, weight=1)
     settingsFrame.grid_columnconfigure(1, weight=1)
     settingsFrame.pack(fill="x", padx=10, pady=(0, 10), ipady=5)
 
     rodKeyLabel = Label(settingsFrame, text="Fishing rod slot: ")
     rodKeyLabel.grid(row=0, column=0)
-    rodKeyTip = Hovertip(rodKeyLabel, """
-When fish didn't appear for while (usually it is because of lag and
-character somehow didn't cast a fishing rod), character will automatically
-try to re-switch tool.
-    """.strip())
-
     rodKeyValue = StringVar(value="ě")
     rodKeyValue.trace('w', checkLen)
     rodKey = Entry(settingsFrame, width=10, justify="center", textvariable=rodKeyValue)
     rodKey.grid(row=0, column=1)
+
+    rodKeyTip = Hovertip(rodKeyLabel, """
+    When fish didn't appear for while (usually it is because of lag and
+character somehow didn't cast a fishing rod), character will automatically
+try to re-switch tool.
+        """.strip())
 
     startBtn = Button(root, text="Start", font=("Segoe UI", 20), bg="#00ff00", command=startBTNClick)
     startBtn.pack(fill="x", padx=10, pady=(0, 5))
 
     statusFrame = LabelFrame(root, text="Status", labelanchor="n")
     statusFrame.pack(fill="x", padx=10, ipady=5)
-    statusText = Label(statusFrame, textvariable=status, font=("Segoe UI", 10))
+    statusText = Label(statusFrame, text=MPData["status"], font=("Segoe UI", 10))
     statusText.pack()
+
+    statisticsFrame = LabelFrame(root, text="Statistics", labelanchor="n")
+    statisticsFrame.pack(fill="x", padx=10, ipady=5)
+    for i in range(4):
+        statisticsFrame.grid_columnconfigure(i, weight=1)
+
+    timeElapsedLabel = Label(statisticsFrame, text="Time Elapsed:")
+    timeElapsedLabel.grid(row=0, column=0)
+    timeElapsed = Label(statisticsFrame, text="00h 00m 00s")
+    timeElapsed.grid(row=0, column=1)
+
+    catchAmountLabel = Label(statisticsFrame, text="Catch amount:")
+    catchAmountLabel.grid(row=0, column=2)
+    catchAmount = Label(statisticsFrame, text="0")
+    catchAmount.grid(row=0, column=3)
 
     while 1:
         if thM is None or not thM.is_alive():
             if startBtn["text"] == "Stop":
                 toggleButton(True)
-        status.set(MPData["status"])
+        statusText["text"] = MPData["status"]
+        if timeStarted is not None:
+            s = (datetime.now() - timeStarted).seconds
+            timeElapsed["text"] = '{:02}h {:02}m {:02}s'.format(s // 3600, s % 3600 // 60, s % 60)
+        catchAmount["text"] = MPData["catchamount"]
         root.update()
