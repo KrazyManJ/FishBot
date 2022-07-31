@@ -1,22 +1,13 @@
-from datetime import datetime
 import pyautogui
+from datetime import datetime
 from pynput.keyboard import Controller as Keyboard
-
-# TODO: Detection of rarity and type of catch
-# TODO: Display of statistics, runtime and loot count (rarity + type)
-# TODO: settings in external json file
-# TODO: Make it look pretty in console
-
-OPTIONS: dict[str, str] = {
-    "fishing_rod_hotkey": "+",
-}
 
 LINE_COLOR: tuple[int, int, int] = (255, 105, 105)
 FISH_COLOR: tuple[int, int, int] = (255, 255, 255)
 
 Region: tuple[int, int, int, int] | None = None
 Count: int = 0
-kboard: Keyboard = Keyboard()
+KBoard: Keyboard = Keyboard()
 
 RARITY_COLORS = {
     "legendary": (129, 150, 65),
@@ -27,18 +18,26 @@ RARITY_COLORS = {
 }
 
 
+class LineData:
+    def __init__(self, line: int | None, catch: int | None, catchtype: str | None, rarity: str | None):
+        self.line = line
+        self.catch = catch
+        self.catchtype = catchtype
+        self.rarity = rarity
+
+
 def getRarityName(color) -> str:
-    def color_difference(color1, color2) -> int:
-        return sum([abs(component1-component2) for component1, component2 in zip(color1, color2)])
+    def a(cl1, cl2) -> int:
+        return sum([abs(c1-c2) for c1, c2 in zip(cl1, cl2)])
     differences = [
-        [color_difference(color, known_color), known_name]
+        [a(color, known_color), known_name]
         for known_name, known_color in RARITY_COLORS.items()
     ]
     differences.sort()
     return differences[0][1]
 
 
-def locateFishAndLinePoints():
+def locateFishAndLinePoints() -> LineData:
     line, catch, catchtype, rarity = None, None, None, None
     pic = pyautogui.screenshot(region=Region)
     for x in range(0, pic.width):
@@ -48,10 +47,10 @@ def locateFishAndLinePoints():
         elif catch is None and color == FISH_COLOR:
             catch = x
             catchtype = "treasure" if pic.getpixel((x + 4, 0)) != FISH_COLOR else "fish"
-            rarity = getRarityName(pic.getpixel((x-5,0)))
+            rarity = getRarityName(pic.getpixel((x-5, 0)))
         if catch is not None and line is not None:
             break
-    return line, catch, catchtype, rarity
+    return LineData(line, catch, catchtype, rarity)
 
 
 def throwBait() -> None:
@@ -63,16 +62,15 @@ def throwBait() -> None:
 
 
 def rethrowBait() -> None:
-    pyautogui.sleep(0.5)
-    kboard.tap(OPTIONS["fishing_rod_hotkey"])
-    pyautogui.sleep(0.5)
-    kboard.tap(OPTIONS["fishing_rod_hotkey"])
+    for i in range(2):
+        pyautogui.sleep(0.5)
+        KBoard.tap("+")
     throwBait()
 
 
 def preventKickAFK() -> None:
     global Count
-    pyautogui.move(100 if Count % 2 == 0 else -100, 0, 1, pyautogui.easeOutQuad)
+    pyautogui.moveTo(x=Region[0] if Count % 2 == 0 else Region[0]+Region[2], y=Region[1], duration=1, tween=pyautogui.easeOutQuad)
     pyautogui.sleep(0.1)
 
 
@@ -80,32 +78,31 @@ def log(value) -> None:
     print(f"({datetime.now().strftime('%H:%M:%S')}) {value}")
 
 
-def ansiRGB(rgb) -> str:
-    return f"\033[38;2;{rgb[0]};{rgb[1]};{rgb[2]}m"
-
-
-ANSI_RESET = "\033[0m"
-
-
 def main() -> None:
     global Count, Region
-    calibrate()
-    if Region is None:
-        log("COULD NOT CALIBRATE, BAR WAS NOT FOUND!")
-        return
+
+    log("SCRIPT INITIALIZED, WAITING FOR FIRST CATCH APPEARANCE FOR CALIBRATING!")
+    timeStarted = datetime.now()
+    while not calibrate():
+        if (datetime.now() - timeStarted).total_seconds() >= 30:
+            log("COULD NOT CALIBRATE, BAR WAS NOT FOUND!")
+            return
+
+    pyautogui.moveTo(Region[0], Region[1])
     log("SUCCESSFULLY CALIBRATED!")
     lastTriggerTime = datetime.now()
-    log("SCRIPT INITIALIZED, WAITING FOR FIRST CATCH TO APPEAR!")
+
     while True:
-        line, catch, catchtype, rarity = locateFishAndLinePoints()
-        if (line, catch) != (None, None):
-            log(f"STARTED FISHING {ansiRGB(RARITY_COLORS[rarity])}{rarity}{ANSI_RESET} {catchtype}!")
+        data = locateFishAndLinePoints()
+        if (data.line, data.catch) != (None, None):
+            log(f"STARTED FISHING!")
+            log(f"{data.rarity} {data.catchtype}")
             lastTriggerTime = datetime.now()
             while True:
-                line, catch, catchtype, rarity = locateFishAndLinePoints()
-                if line is None:
+                data = locateFishAndLinePoints()
+                if data.line is None:
                     break
-                elif catch is not None and line < catch:
+                elif data.catch is not None and data.line < data.catch:
                     pyautogui.mouseDown()
                 else:
                     pyautogui.mouseUp()
@@ -123,7 +120,7 @@ def main() -> None:
         pyautogui.sleep(0.1)
 
 
-def calibrate() -> None:
+def calibrate() -> bool:
     global Region
     s = pyautogui.screenshot()
     lx, ly, linemiddle = None, None, None
@@ -135,7 +132,7 @@ def calibrate() -> None:
         if (lx, ly) != (None, None):
             break
     if (lx, ly) == (None, None):
-        return
+        return False
     for y in range(ly, s.height):
         if s.getpixel((lx, y)) != LINE_COLOR:
             linemiddle = ly + (y - ly) // 2.7
@@ -144,6 +141,7 @@ def calibrate() -> None:
         if s.getpixel((x, ly)) == (255, 255, 255):
             Region = (lx, linemiddle, x - lx, 1)
             break
+    return Region is not None
 
 
 if __name__ == '__main__':
