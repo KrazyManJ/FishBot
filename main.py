@@ -1,13 +1,12 @@
 import pyautogui
 from idlelib.tooltip import Hovertip
-from multiprocessing import Process, Manager
-from tkinter import Tk, Label, LabelFrame, Entry, Button, StringVar
+from threading import Thread, Event
+from tkinter import Tk, Label, LabelFrame, Entry, Button, Variable
 from datetime import datetime
 from pynput.keyboard import Controller as Keyboard
 
 LINE_COLOR: tuple[int, int, int] = (255, 105, 105)
 FISH_COLOR: tuple[int, int, int] = (255, 255, 255)
-CATCH_TYPES = ["fish", "treasure"]
 
 Region: tuple[int, int, int, int] | None = None
 
@@ -77,48 +76,6 @@ def preventKickAFK(toggler) -> None:
     pyautogui.sleep(0.1)
 
 
-def main(processdata) -> None:
-    def updateStatus(value):
-        processdata["status"] = value
-
-    global Region
-    updateStatus("Waiting for first catch to appear for calibration...")
-    calibrationStart = datetime.now()
-    while not calibrate():
-        if (datetime.now() - calibrationStart).total_seconds() >= 30:
-            updateStatus("Error: Could not calibrate because bar was not found, script stopped!")
-            return
-    pyautogui.moveTo(Region[0], Region[1])
-    lastTriggerTime = datetime.now()
-    while True:
-        updateStatus("Waiting for another fish...")
-        data = locateFishAndLinePoints()
-        startRarity, startCatchtype = data.rarity, data.catchtype
-        if (data.line, data.catch) != (None, None):
-            updateStatus(f"Fishing {data.rarity} {data.catchtype}...")
-            lastTriggerTime = datetime.now()
-            while True:
-                data = locateFishAndLinePoints()
-                if data.line is None:
-                    break
-                elif data.catch is not None and data.line < data.catch:
-                    pyautogui.mouseDown()
-                else:
-                    pyautogui.mouseUp()
-            pyautogui.mouseUp()
-            processdata["catchamount"] += 1
-            processdata[f"{startRarity}_{startCatchtype}"] += 1
-            updateStatus("Preventick AFK-Kick...")
-            preventKickAFK(processdata["catchamount"] % 2 == 0)
-            updateStatus("Casting fishing rod...")
-            castRod()
-        if (datetime.now() - lastTriggerTime).total_seconds() >= 30:
-            lastTriggerTime = datetime.now()
-            updateStatus("No fish for a long time, casting fishing rod again...")
-            castRodAgain(processdata["rod_key"])
-        pyautogui.sleep(0.1)
-
-
 def calibrate() -> bool:
     global Region
     s = pyautogui.screenshot()
@@ -143,6 +100,71 @@ def calibrate() -> bool:
     return Region is not None
 
 
+class BackendThread(Thread):
+
+    def __init__(self):
+        super(BackendThread, self).__init__(daemon=True)
+        self._stop_event = Event()
+        self._time_started = datetime.now()
+        print(OutputValues.keys())
+
+    def terminate(self): self._stop_event.set()
+
+    def isTerminated(self): return self._stop_event.is_set()
+
+    def run(self) -> None:
+        def updateStatus(value):
+            if not self.isTerminated(): OutputValues["status"].set(value)
+
+        def updateTime():
+            if thM is not None and thM.is_alive():
+                s = (datetime.now() - self._time_started).seconds
+                OutputValues["time_elapsed"].set('{:02}h {:02}m {:02}s'.format(s // 3600, s % 3600 // 60, s % 60))
+                win.after(1000, updateTime)
+
+        global Region
+        updateStatus("Waiting for first catch to appear for calibration...")
+        calibrationStart = datetime.now()
+        while not calibrate():
+            if self.isTerminated(): return
+            if (datetime.now() - calibrationStart).total_seconds() >= 30:
+                updateStatus("Error: Could not calibrate because bar was not found, script stopped!")
+                toggleButton(True)
+                return
+        updateTime()
+        pyautogui.moveTo(Region[0], Region[1])
+        lastTriggerTime = datetime.now()
+        while True:
+            if self.isTerminated(): return
+            updateStatus("Waiting for another fish...")
+            data = locateFishAndLinePoints()
+            sR, sCt = data.rarity, data.catchtype
+            if (data.line, data.catch) != (None, None):
+                updateStatus(f"Fishing {data.rarity} {data.catchtype}...")
+                lastTriggerTime = datetime.now()
+                while True:
+                    if self.isTerminated(): return
+                    data = locateFishAndLinePoints()
+                    if data.line is None:
+                        break
+                    elif data.catch is not None and data.line < data.catch:
+                        pyautogui.mouseDown()
+                    else:
+                        pyautogui.mouseUp()
+                pyautogui.mouseUp()
+                OutputValues["total_catch_amount"].set(OutputValues["total_catch_amount"].get() + 1)
+                OutputValues[f"{sR}_{sCt}"].set(OutputValues[f"{sR}_{sCt}"].get() + 1)
+                updateStatus("Preventick AFK-Kick...")
+                preventKickAFK(OutputValues["total_catch_amount"].get() % 2 == 0)
+                updateStatus("Casting fishing rod...")
+                castRod()
+            if (datetime.now() - lastTriggerTime).total_seconds() >= 30:
+                lastTriggerTime = datetime.now()
+                updateStatus("No fish for a long time, casting fishing rod again...")
+                castRodAgain(OutputValues["settings_rod_key"].get())
+            pyautogui.sleep(0.1)
+
+
 if __name__ == '__main__':
 
     win = Tk()
@@ -151,26 +173,14 @@ if __name__ == '__main__':
     win.iconbitmap("icon.ico")
     win.minsize(400, 640)
 
-    thM: None | Process = None
-    MPData = Manager().dict()
-    for init in [("status", ""), ("timeelapsed", "00:00:00"), ("catchamount", 0)]:
-        MPData[init[0]] = init[1]
-    for ctype in CATCH_TYPES:
-        for rtype in RARITY_COLORS.keys():
-            MPData[f"{rtype}_{ctype}"] = 0
-
-    timeStarted: None | datetime = None
-
-    OutputValues = {}
+    thM: None | BackendThread = None
+    OutputValues: dict[str, Variable] = {}
 
 
-    def updateValues():
-        for key in OutputValues.keys():
-            if OutputValues.get(key) is not None:
-                OutputValues[key]["text"] = MPData[key]
-        if timeStarted is not None:
-            s = (datetime.now() - timeStarted).seconds
-            timeElapsed["text"] = '{:02}h {:02}m {:02}s'.format(s // 3600, s % 3600 // 60, s % 60)
+    def regVar(name, defaultval):
+        val = Variable(master=win, value=defaultval)
+        OutputValues[name] = val
+        return val
 
 
     def toggleButton(state: bool) -> None:
@@ -181,19 +191,16 @@ if __name__ == '__main__':
 
 
     def startBTNClick():
-        global thM, timeStarted
+        global thM
         if thM is None or not thM.is_alive():
-            MPData["rod_key"] = rodKeyValue.get()
-            MPData["catchamount"] = 0
-            thM, timeStarted = Process(target=main, args=(MPData,), daemon=True), datetime.now()
+            OutputValues["total_catch_amount"].set(0)
+            thM = BackendThread()
             thM.start()
             toggleButton(False)
         else:
             thM.terminate()
-            thM = None
             toggleButton(True)
-            MPData["status"] = "Script stopped!"
-            timeStarted = None
+            OutputValues["status"].set("Script stopped!")
 
 
     def checkLen(*args):
@@ -206,13 +213,12 @@ if __name__ == '__main__':
     Label(win, text="Made by Kr4zyM4nJ", font=("Segoe UI", 10)).pack(pady=(0, 10))
 
     settingsFrame = LabelFrame(win, text="Settings (Hover for description)", labelanchor="n")
-    for i in range(2):
-        settingsFrame.grid_columnconfigure(i, weight=1)
+    for i in range(2): settingsFrame.grid_columnconfigure(i, weight=1)
     settingsFrame.pack(fill="x", padx=10, pady=(0, 10), ipady=5)
 
     rodKeyLabel = Label(settingsFrame, text="Fishing rod slot: ")
     rodKeyLabel.grid(row=0, column=0)
-    rodKeyValue = StringVar(value="+")
+    rodKeyValue = regVar("settings_rod_key", "+")
     rodKeyValue.trace('w', checkLen)
     rodKey = Entry(settingsFrame, width=10, justify="center", textvariable=rodKeyValue)
     rodKey.grid(row=0, column=1)
@@ -227,50 +233,30 @@ try to re-switch tool.
 
     statusFrame = LabelFrame(win, text="Status", labelanchor="n")
     statusFrame.pack(fill="x", padx=10, ipady=5)
-    statusText = Label(statusFrame, text=MPData["status"], font=("Segoe UI", 10))
+    statusText = Label(statusFrame, textvariable=regVar("status", ""), font=("Segoe UI", 10))
     statusText.pack()
-    OutputValues["status"] = statusText
 
     statisticsFrame = LabelFrame(win, text="Statistics", labelanchor="n")
     statisticsFrame.pack(fill="x", padx=10, ipady=5)
-    for i in range(4):
-        statisticsFrame.grid_columnconfigure(i, weight=1)
+    for i in range(4): statisticsFrame.grid_columnconfigure(i, weight=1)
 
     Label(statisticsFrame, text="Time Elapsed:").grid(row=0, column=0)
-    timeElapsed = Label(statisticsFrame, text="00h 00m 00s")
+    timeElapsed = Label(statisticsFrame, textvariable=regVar("time_elapsed", "00h 00m 00s"))
     timeElapsed.grid(row=0, column=1)
 
     Label(statisticsFrame, text="Catch amount:").grid(row=0, column=2)
-    catchAmount = Label(statisticsFrame, text="0")
+    catchAmount = Label(statisticsFrame, textvariable=regVar("total_catch_amount", 0))
     catchAmount.grid(row=0, column=3)
-    OutputValues["catchamount"] = catchAmount
 
-    for caType in CATCH_TYPES:
+    for caType in ["fish", "treasure"]:
         tempLF = LabelFrame(statisticsFrame, text=caType.title())
         tempLF.grid(columnspan=4, sticky="NESW", padx=10, ipady=5)
-        for i in range(2):
-            tempLF.grid_columnconfigure(i, weight=1)
+        for i in range(2): tempLF.grid_columnconfigure(i, weight=1)
         for i in range(0, RARITY_COLORS.keys().__len__()):
             caRar = list(RARITY_COLORS.keys()).__getitem__(i)
             Label(tempLF, text=caRar.title()).grid(row=i, column=0)
-            tempLB = Label(tempLF, text=0)
+            tempLB = Label(tempLF, textvariable=regVar(f"{caRar}_{caType}", 0))
             tempLB.grid(row=i, column=1)
-            OutputValues[f"{caRar}_{caType}"] = tempLB
 
-    Run = True
-
-
-    def on_close():
-        global Run
-        Run = False
-        win.destroy()
-
-
-    win.protocol("WM_DELETE_WINDOW", on_close)
-
-    while Run:
-        updateValues()
-        if thM is None or not thM.is_alive():
-            if startBtn["text"] == "Stop":
-                toggleButton(True)
-        win.update()
+    win.protocol("WM_DELETE_WINDOW", lambda: win.destroy())
+    win.mainloop()
