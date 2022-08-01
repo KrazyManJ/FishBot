@@ -1,5 +1,3 @@
-from array import array
-
 import pyautogui
 from idlelib.tooltip import Hovertip
 from multiprocessing import Process, Manager
@@ -13,18 +11,11 @@ CATCH_TYPES = ["fish", "treasure"]
 
 Region: tuple[int, int, int, int] | None = None
 
-# RARITY_COLORS = {
-#     "common": (109, 127, 144),
-#     "uncommon": (52, 148, 89),
-#     "rare": (53, 91, 137),
-#     "mythic": (162, 95, 170),
-#     "legendary": (129, 150, 65),
-# }
 RARITY_COLORS = {
-    "common": (120, 120, 120),
+    "common": (109, 127, 144),
     "uncommon": (52, 148, 89),
     "rare": (53, 91, 137),
-    "mythic": (158, 52, 235),
+    "mythic": (162, 95, 170),
     "legendary": (129, 150, 65),
 }
 
@@ -50,19 +41,19 @@ def getRarityName(color) -> str:
 
 
 def locateFishAndLinePoints() -> LineData:
-    line, catch, catchtype, rarity = None, None, None, None
+    line, c, ct, r = None, None, None, None
     pic = pyautogui.screenshot(region=Region)
     for x in range(0, pic.width):
         color = pic.getpixel((x, 0))
         if line is None and color == LINE_COLOR:
             line = x
-        elif catch is None and color == FISH_COLOR:
-            catch = x
-            catchtype = "treasure" if pic.getpixel((x + 4, 0)) != FISH_COLOR else "fish"
-            rarity = getRarityName(pic.getpixel((x - 5, 0)))
-        if catch is not None and line is not None:
+        elif c is None and color == FISH_COLOR:
+            c = x
+            ct = "treasure" if pic.getpixel((x + 4, 0)) != FISH_COLOR else "fish"
+            r = getRarityName(pic.getpixel((x - 5, 0)))
+        if c is not None and line is not None:
             break
-    return LineData(line, catch, catchtype, rarity)
+    return LineData(line, c, ct, r)
 
 
 def castRod() -> None:
@@ -74,7 +65,7 @@ def castRod() -> None:
 
 
 def castRodAgain(rodhotkey) -> None:
-    for [] in range(2):
+    for index in range(2):
         pyautogui.sleep(0.5)
         Keyboard().tap(rodhotkey)
     castRod()
@@ -92,9 +83,9 @@ def main(processdata) -> None:
 
     global Region
     updateStatus("Waiting for first catch to appear for calibration...")
-    timeStarted = datetime.now()
+    calibrationStart = datetime.now()
     while not calibrate():
-        if (datetime.now() - timeStarted).total_seconds() >= 30:
+        if (datetime.now() - calibrationStart).total_seconds() >= 30:
             updateStatus("Error: Could not calibrate because bar was not found, script stopped!")
             return
     pyautogui.moveTo(Region[0], Region[1])
@@ -102,7 +93,7 @@ def main(processdata) -> None:
     while True:
         updateStatus("Waiting for another fish...")
         data = locateFishAndLinePoints()
-        rarity,catchtype = data.rarity,data.catchtype
+        startRarity, startCatchtype = data.rarity, data.catchtype
         if (data.line, data.catch) != (None, None):
             updateStatus(f"Fishing {data.rarity} {data.catchtype}...")
             lastTriggerTime = datetime.now()
@@ -116,7 +107,7 @@ def main(processdata) -> None:
                     pyautogui.mouseUp()
             pyautogui.mouseUp()
             processdata["catchamount"] += 1
-            processdata[f"{rarity}_{catchtype}"] += 1
+            processdata[f"{startRarity}_{startCatchtype}"] += 1
             updateStatus("Preventick AFK-Kick...")
             preventKickAFK(processdata["catchamount"] % 2 == 0)
             updateStatus("Casting fishing rod...")
@@ -158,18 +149,15 @@ if __name__ == '__main__':
     win.title("FishBot")
     win.geometry(f"425x{pyautogui.size().height - 75}+{pyautogui.size().width - 425}+0")
     win.iconbitmap("icon.ico")
-    win.minsize(400, 400)
+    win.minsize(400, 640)
 
     thM: None | Process = None
-    manager = Manager()
-    MPData = manager.dict()
-    MPData["status"] = ""
-    MPData["timeelapsed"] = "00:00:00"
-    MPData["catchamount"] = 0
-    MPData["catches"] = {}
-    for catchtype in CATCH_TYPES:
-        for rarity in RARITY_COLORS.keys():
-            MPData[f"{rarity}_{catchtype}"] = 0
+    MPData = Manager().dict()
+    for init in [("status", ""), ("timeelapsed", "00:00:00"), ("catchamount", 0)]:
+        MPData[init[0]] = init[1]
+    for ctype in CATCH_TYPES:
+        for rtype in RARITY_COLORS.keys():
+            MPData[f"{rtype}_{ctype}"] = 0
 
     timeStarted: None | datetime = None
 
@@ -197,10 +185,9 @@ if __name__ == '__main__':
         if thM is None or not thM.is_alive():
             MPData["rod_key"] = rodKeyValue.get()
             MPData["catchamount"] = 0
-            thM = Process(target=main, args=(MPData,), daemon=True)
+            thM, timeStarted = Process(target=main, args=(MPData,), daemon=True), datetime.now()
             thM.start()
             toggleButton(False)
-            timeStarted = datetime.now()
         else:
             thM.terminate()
             thM = None
@@ -225,11 +212,10 @@ if __name__ == '__main__':
 
     rodKeyLabel = Label(settingsFrame, text="Fishing rod slot: ")
     rodKeyLabel.grid(row=0, column=0)
-    rodKeyValue = StringVar(value="ě")
+    rodKeyValue = StringVar(value="+")
     rodKeyValue.trace('w', checkLen)
     rodKey = Entry(settingsFrame, width=10, justify="center", textvariable=rodKeyValue)
     rodKey.grid(row=0, column=1)
-
     rodKeyTip = Hovertip(rodKeyLabel, """
     When fish didn't appear for while (usually it is because of lag and
 character somehow didn't cast a fishing rod), character will automatically
@@ -250,30 +236,39 @@ try to re-switch tool.
     for i in range(4):
         statisticsFrame.grid_columnconfigure(i, weight=1)
 
-    timeElapsedLabel = Label(statisticsFrame, text="Time Elapsed:")
-    timeElapsedLabel.grid(row=0, column=0)
+    Label(statisticsFrame, text="Time Elapsed:").grid(row=0, column=0)
     timeElapsed = Label(statisticsFrame, text="00h 00m 00s")
     timeElapsed.grid(row=0, column=1)
 
-    catchAmountLabel = Label(statisticsFrame, text="Catch amount:")
-    catchAmountLabel.grid(row=0, column=2)
+    Label(statisticsFrame, text="Catch amount:").grid(row=0, column=2)
     catchAmount = Label(statisticsFrame, text="0")
     catchAmount.grid(row=0, column=3)
     OutputValues["catchamount"] = catchAmount
 
     for caType in CATCH_TYPES:
         tempLF = LabelFrame(statisticsFrame, text=caType.title())
-        tempLF.grid(columnspan=4,sticky="NESW",padx=10, ipady=5)
+        tempLF.grid(columnspan=4, sticky="NESW", padx=10, ipady=5)
         for i in range(2):
             tempLF.grid_columnconfigure(i, weight=1)
-        for i in range(0,RARITY_COLORS.keys().__len__()):
+        for i in range(0, RARITY_COLORS.keys().__len__()):
             caRar = list(RARITY_COLORS.keys()).__getitem__(i)
-            Label(tempLF, text=caRar.title()).grid(row=i,column=0)
-            tempLB = Label(tempLF,text=0)
-            tempLB.grid(row=i,column=1)
+            Label(tempLF, text=caRar.title()).grid(row=i, column=0)
+            tempLB = Label(tempLF, text=0)
+            tempLB.grid(row=i, column=1)
             OutputValues[f"{caRar}_{caType}"] = tempLB
 
-    while 1:
+    Run = True
+
+
+    def on_close():
+        global Run
+        Run = False
+        win.destroy()
+
+
+    win.protocol("WM_DELETE_WINDOW", on_close)
+
+    while Run:
         updateValues()
         if thM is None or not thM.is_alive():
             if startBtn["text"] == "Stop":
