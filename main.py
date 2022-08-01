@@ -1,3 +1,5 @@
+import os
+import sys
 import pyautogui
 from idlelib.tooltip import Hovertip
 from threading import Thread, Event
@@ -108,9 +110,11 @@ class BackendThread(Thread):
         self._time_started = datetime.now()
         print(OutputValues.keys())
 
-    def terminate(self): self._stop_event.set()
+    def terminate(self):
+        self._stop_event.set()
 
-    def isTerminated(self): return self._stop_event.is_set()
+    def isTerminated(self):
+        return self._stop_event.is_set()
 
     def run(self) -> None:
         def updateStatus(value):
@@ -165,12 +169,20 @@ class BackendThread(Thread):
             pyautogui.sleep(0.1)
 
 
+def resource_path(relative_path):
+    try:
+        base_path = sys._MEIPASS
+    except Exception:
+        base_path = os.path.abspath(".")
+    return os.path.join(base_path, relative_path)
+
+
 if __name__ == '__main__':
 
     win = Tk()
     win.title("FishBot")
     win.geometry(f"425x{pyautogui.size().height - 75}+{pyautogui.size().width - 425}+0")
-    win.iconbitmap("icon.ico")
+    win.iconbitmap(resource_path("icon.ico"))
     win.minsize(400, 640)
 
     thM: None | BackendThread = None
@@ -203,10 +215,17 @@ if __name__ == '__main__':
             OutputValues["status"].set("Script stopped!")
 
 
+    optionBefore = "+"
+
     def checkLen(*args):
+        global optionBefore
         value = rodKeyValue.get()
         if len(value) > 1:
-            rodKeyValue.set(value[:1])
+            rodKeyValue.set(value[1])
+            optionBefore = value[1]
+        else:
+            rodKeyValue.set(optionBefore)
+
 
 
     Label(win, text="FishBot", font=("Segoe UI", 50)).pack()
