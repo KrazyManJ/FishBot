@@ -5,7 +5,7 @@ from idlelib.tooltip import Hovertip
 from threading import Thread, Event
 from tkinter import Tk, Label, LabelFrame, Entry, Button, Variable, Checkbutton
 from datetime import datetime, timedelta
-from pynput.keyboard import Controller as Keyboard
+from pynput.keyboard import Controller as Keyboard, Listener, Key
 
 LINE_COLOR: tuple[int, int, int] = (255, 105, 105)
 FISH_COLOR: tuple[int, int, int] = (255, 255, 255)
@@ -169,6 +169,7 @@ class FishBotThread(Thread):
                     updateStatus("Using baits...")
                     FishBotThread.__useBaits()
                     lastBaitTime = datetime.now()
+                    if self.isTerminated(): return
                 updateStatus("Casting fishing rod...")
                 self.__castRod()
                 if self.isTerminated(): return
@@ -204,9 +205,7 @@ class GUI:
 
         rodKeyLabel = Label(settingsFrame, text="Fishing rod slot: ")
         rodKeyLabel.grid(row=0, column=0)
-        rodKeyValue = GUI.__regVar("settings_rod_key", "+")
-        rodKeyValue.trace_add('write', GUI.__charBinding)
-        Entry(settingsFrame, width=10, justify="center", textvariable=rodKeyValue).grid(row=0, column=1)
+        Entry(settingsFrame, width=10, justify="center", textvariable=GUI.__regVar("settings_rod_key", "+", GUI.__charBinding)).grid(row=0, column=1)
 
         rodKeyTip = Hovertip(rodKeyLabel, """
 When fish didn't appear for while (usually it is because of lag and
@@ -215,22 +214,15 @@ try to re-switch tool.
                 """.strip())
 
         Label(settingsFrame, text="Use baits: ").grid(row=1, column=0)
-        useBaits = GUI.__regVar("settings_use_baits",False)
-        useBaits.trace_add("write",GUI.__baitCheckBox)
-        Checkbutton(settingsFrame, variable=useBaits).grid(row=1, column=1)
+        Checkbutton(settingsFrame, variable=GUI.__regVar("settings_use_baits",False,GUI.__baitCheckBox)).grid(row=1, column=1)
 
 
-        bait1Value = GUI.__regVar("settings_bait1_key","ě")
-        bait1Value.trace_add("write", GUI.__charBinding)
-        Label(settingsFrame, text="Tier 1 bait key: ").grid(row=2, column=0)
-        GUI.Elems["settings_bait1_key"] = Entry(settingsFrame, width=10, justify="center", state="disabled", textvariable=bait1Value)
-        GUI.Elems["settings_bait1_key"].grid(row=2, column=1)
+        for data in [("1","ě",2),("2","š",3)]:
+            Label(settingsFrame, text="Tier 1 bait key: ").grid(row=data[2], column=0)
+            GUI.Elems[f"settings_bait{data[0]}_key"] = Entry(settingsFrame, width=10, justify="center", state="disabled",
+                                                    textvariable=GUI.__regVar(f"settings_bait{data[0]}_key", data[1], GUI.__charBinding))
+            GUI.Elems[f"settings_bait{data[0]}_key"].grid(row=data[2], column=1)
 
-        bait2Value = GUI.__regVar("settings_bait2_key","š")
-        bait2Value.trace_add("write",GUI.__charBinding)
-        Label(settingsFrame, text="Tier 2 bait key: ").grid(row=3, column=0)
-        GUI.Elems["settings_bait2_key"] = Entry(settingsFrame, width=10, justify="center", state="disabled", textvariable=bait2Value)
-        GUI.Elems["settings_bait2_key"].grid(row=3, column=1)
 
 
         GUI.Elems["start_button"] = Button(win, text="Start", font=("Segoe UI", 20), bg="#00ff00", command=GUI.__btnClick)
@@ -258,15 +250,24 @@ try to re-switch tool.
                 Label(tempLF, text=caRar.title()).grid(row=i, column=0)
                 Label(tempLF, textvariable=GUI.__regVar(f"{caRar}_{caType}", 0)).grid(row=i, column=1)
         win.protocol("WM_DELETE_WINDOW", lambda: win.destroy())
+        Listener(on_press=GUI.__keyboardHandle).start()
         win.mainloop()
 
     @staticmethod
     def toggleButton(state: bool) -> None:
-        GUI.Elems["start_button"].__setitem__("text","Start" if state else "Stop")
+        GUI.Elems["start_button"].__setitem__("text","Start" if state else "Stop (End)")
         GUI.Elems["start_button"].__setitem__("bg","#00ff00" if state else "#ff0000")
         for child in GUI.Elems["settings_frame"].winfo_children():
             child["state"] = "normal" if state else "disabled"
         GUI.__baitCheckBox()
+
+    @staticmethod
+    def __keyboardHandle(key):
+        if GUI.thread is not None and GUI.thread.is_alive():
+            if type(key) is Key and key == key.end:
+                GUI.thread.terminate()
+                GUI.toggleButton(True)
+                GUI.Vars["status"].set("Script stopped!")
 
     @staticmethod
     def __btnClick():
@@ -306,11 +307,11 @@ try to re-switch tool.
             for option in ["settings_bait1_key","settings_bait2_key"]:
                 GUI.Elems[option]["state"] = "disabled"
 
-
     @staticmethod
-    def __regVar(name, defaultval):
+    def __regVar(name, defaultval, writeCallback = None):
         val = Variable(master=GUI.win, value=defaultval, name=name)
         GUI.Vars[name] = val
+        if writeCallback is not None: val.trace_add("write",writeCallback)
         return val
 
 
