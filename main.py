@@ -200,7 +200,8 @@ class GUI:
     def drawAndOpen():
         win = GUI.win
         win.title("FishBot")
-        win.geometry(f"425x{pyautogui.size().height - 75}+{pyautogui.size().width - 425}+0")
+        win.geometry("400x600")
+        #win.geometry(f"425x{pyautogui.size().height - 75}+{pyautogui.size().width - 425}+0")
         win.iconbitmap(GUI.__resourcePath("icon.ico"))
         win.minsize(400, 640)
 
