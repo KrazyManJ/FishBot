@@ -9,14 +9,16 @@ from pynput.keyboard import Controller as Keyboard, Listener, Key
 
 LINE_COLOR: tuple[int, int, int] = (255, 105, 105)
 FISH_COLOR: tuple[int, int, int] = (255, 255, 255)
+
 RARITY_COLORS = {
-    "common": (109, 127, 144),
-    "uncommon": (52, 148, 89),
-    "rare": (53, 91, 137),
-    "mythic": (162, 95, 170),
-    "legendary": (129, 150, 65),
+    "common": (113, 116, 121),
+    "uncommon": (33, 131, 36),
+    "rare": (39, 89, 142),
+    "mythic": (138, 55, 131),
+    "legendary": (139, 144, 27),
 }
 
+LOOT_TYPE_BLACKLIST = ["legendary_fish","common_treasure","mythic_treasure"]
 
 class FishBotScanData:
     def __init__(self, line: int | None, catch: int | None, catchtype: str | None, rarity: str | None):
@@ -40,8 +42,8 @@ class FishBotThread(Thread):
     def isTerminated(self) -> bool:
         return self._stop_event.is_set()
 
-    def __scanData(self) -> FishBotScanData:
-        line, c, ct, r = None, None, None, None
+    def __scanData(self,includeLootData) -> FishBotScanData:
+        line, c, ct, r = None, None, None, "unknown"
         pic = pyautogui.screenshot(region=self._region)
         for x in range(0, pic.width):
             color = pic.getpixel((x, 0))
@@ -49,8 +51,13 @@ class FishBotThread(Thread):
                 line = x
             elif c is None and color == FISH_COLOR:
                 c = x
-                ct = "treasure" if pic.getpixel((x + 4, 0)) != FISH_COLOR else "fish"
-                r = FishBotThread.__getRarityName(pic.getpixel((x - 5, 0)))
+                if includeLootData:
+                    ct = "treasure" if pic.getpixel((x + 4, 0)) != FISH_COLOR else "fish"
+                    if line is not None:
+                        for bc in range(x,line,-1):
+                            col = pic.getpixel((bc,0))
+                            if col in RARITY_COLORS.values():
+                                r = (list(RARITY_COLORS.keys())[list(RARITY_COLORS.values()).index(col)])
             if c is not None and line is not None:
                 break
         return FishBotScanData(line, c, ct, r)
@@ -110,14 +117,13 @@ class FishBotThread(Thread):
         pyautogui.sleep(0.1)
 
     @staticmethod
-    def __useBaits():
+    def __useBait(baitType):
         kboard = Keyboard()
-        for var in [GUI.Vars["settings_bait1_key"],GUI.Vars["settings_bait2_key"]]:
-            kboard.tap(var.get())
-            pyautogui.mouseDown()
-            pyautogui.sleep(1)
-            pyautogui.mouseUp()
-            pyautogui.sleep(0.2)
+        kboard.tap(GUI.Vars[f"settings_bait{baitType}_key"].get())
+        pyautogui.mouseDown()
+        pyautogui.sleep(1)
+        pyautogui.mouseUp()
+        pyautogui.sleep(0.2)
         kboard.tap(GUI.Vars["settings_rod_key"].get())
 
     def __run(self) -> None:
@@ -144,14 +150,14 @@ class FishBotThread(Thread):
         while True:
             if self.isTerminated(): return
             updateStatus("Waiting for another fish...")
-            data = self.__scanData()
+            data = self.__scanData(True)
             sR, sCt = data.rarity, data.catchtype
             if (data.line, data.catch) != (None, None):
                 updateStatus(f"Fishing {data.rarity} {data.catchtype}...")
                 lastTriggerTime = datetime.now()
                 while True:
                     if self.isTerminated(): return
-                    data = self.__scanData()
+                    data = self.__scanData(False)
                     if data.line is None:
                         break
                     elif data.catch is not None and data.line < data.catch:
@@ -165,11 +171,14 @@ class FishBotThread(Thread):
                 if self.isTerminated(): return
                 self.__preventAFKKick(GUI.Vars["total_catch_amount"].get() % 2 == 0)
                 if self.isTerminated(): return
-                if GUI.Vars["settings_use_baits"].get() == "1" and (datetime.now() - lastBaitTime).total_seconds() >= 120:
-                    updateStatus("Using baits...")
-                    FishBotThread.__useBaits()
-                    lastBaitTime = datetime.now()
-                    if self.isTerminated(): return
+                if GUI.Vars["settings_use_bait1"].get() == "1" or GUI.Vars["settings_use_bait2"].get() == "1":
+                    if (datetime.now() - lastBaitTime).total_seconds() >= 120:
+                        for i in range(1,3):
+                            if GUI.Vars[f"settings_use_bait{i}"].get() == "1":
+                                updateStatus(f"Using tier {i} bait...")
+                                FishBotThread.__useBait(i)
+                            if self.isTerminated(): return
+                        lastBaitTime = datetime.now()
                 updateStatus("Casting fishing rod...")
                 self.__castRod()
                 if self.isTerminated(): return
@@ -199,29 +208,33 @@ class GUI:
         Label(win, text="Made by Kr4zyM4nJ", font=("Segoe UI", 10)).pack(pady=(0, 10))
 
         settingsFrame = LabelFrame(win, text="Settings (Hover for description)", labelanchor="n")
-        for i in range(2): settingsFrame.grid_columnconfigure(i, weight=1)
+        for i in range(3): settingsFrame.grid_columnconfigure(i, weight=1)
         settingsFrame.pack(fill="x", padx=10, pady=(0, 10), ipady=5)
         GUI.Elems["settings_frame"] = settingsFrame
 
-        rodKeyLabel = Label(settingsFrame, text="Fishing rod slot: ")
-        rodKeyLabel.grid(row=0, column=0)
-        Entry(settingsFrame, width=10, justify="center", textvariable=GUI.__regVar("settings_rod_key", "+", GUI.__charBinding)).grid(row=0, column=1)
-
-        rodKeyTip = Hovertip(rodKeyLabel, """
+        rodKeyLabel = Label(settingsFrame, text="Fishing rod slot keybind: ")
+        rodKeyLabel.grid(row=0, column=0, columnspan=2)
+        Entry(settingsFrame, width=10, justify="center", textvariable=GUI.__regVar("settings_rod_key", "1", GUI.__charBinding)).grid(row=0, column=2)
+        Hovertip(rodKeyLabel, """
 When fish didn't appear for while (usually it is because of lag and
 character somehow didn't cast a fishing rod), character will automatically
 try to re-switch tool.
                 """.strip())
 
-        Label(settingsFrame, text="Use baits: ").grid(row=1, column=0)
-        Checkbutton(settingsFrame, variable=GUI.__regVar("settings_use_baits",False,GUI.__baitCheckBox)).grid(row=1, column=1)
 
 
-        for data in [("1","ě",2),("2","š",3)]:
-            Label(settingsFrame, text="Tier 1 bait key: ").grid(row=data[2], column=0)
+        for data in [("1","2",2),("2","3",3)]:
+            lab = Label(settingsFrame, text=f"Tier {data[0]} bait:")
+            lab.grid(row=data[2], column=0)
+            Checkbutton(settingsFrame, variable=GUI.__regVar(f"settings_use_bait{data[0]}", False, GUI.__baitCheckBox)).grid(
+                row=data[2], column=1)
             GUI.Elems[f"settings_bait{data[0]}_key"] = Entry(settingsFrame, width=10, justify="center", state="disabled",
                                                     textvariable=GUI.__regVar(f"settings_bait{data[0]}_key", data[1], GUI.__charBinding))
-            GUI.Elems[f"settings_bait{data[0]}_key"].grid(row=data[2], column=1)
+            GUI.Elems[f"settings_bait{data[0]}_key"].grid(row=data[2], column=2)
+            Hovertip(lab,f"""
+If enabled, character will always try to use Tier {data[0]} bait before casting fishing rod in
+interval of 2 minutes (this is how long Tier {data[0]} bait lasts).
+            """.strip())
 
 
 
@@ -230,7 +243,7 @@ try to re-switch tool.
 
         statusFrame = LabelFrame(win, text="Status", labelanchor="n")
         statusFrame.pack(fill="x", padx=10, ipady=5)
-        Label(statusFrame, textvariable=GUI.__regVar("status", ""), font=("Segoe UI", 10)).pack()
+        Label(statusFrame, textvariable=GUI.__regVar("status", "Ready to use! Hit \"Start\" to begin!"), font=("Segoe UI", 10)).pack()
 
         statsFrame = LabelFrame(win, text="Statistics", labelanchor="n")
         statsFrame.pack(fill="x", padx=10, ipady=5)
@@ -247,8 +260,9 @@ try to re-switch tool.
             for i in range(2): tempLF.grid_columnconfigure(i, weight=1)
             for i in range(0, RARITY_COLORS.keys().__len__()):
                 caRar = list(RARITY_COLORS.keys()).__getitem__(i)
-                Label(tempLF, text=caRar.title()).grid(row=i, column=0)
-                Label(tempLF, textvariable=GUI.__regVar(f"{caRar}_{caType}", 0)).grid(row=i, column=1)
+                if f"{caRar}_{caType}" not in LOOT_TYPE_BLACKLIST:
+                    Label(tempLF, text=caRar.title()).grid(row=i, column=0)
+                    Label(tempLF, textvariable=GUI.__regVar(f"{caRar}_{caType}", 0)).grid(row=i, column=1)
         win.protocol("WM_DELETE_WINDOW", lambda: win.destroy())
         Listener(on_press=GUI.__keyboardHandle).start()
         win.mainloop()
@@ -259,7 +273,8 @@ try to re-switch tool.
         GUI.Elems["start_button"].__setitem__("bg","#00ff00" if state else "#ff0000")
         for child in GUI.Elems["settings_frame"].winfo_children():
             child["state"] = "normal" if state else "disabled"
-        GUI.__baitCheckBox()
+        if state:
+            GUI.__baitCheckBox()
 
     @staticmethod
     def __keyboardHandle(key):
@@ -273,6 +288,10 @@ try to re-switch tool.
     def __btnClick():
         if GUI.thread is None or not GUI.thread.is_alive():
             GUI.Vars["total_catch_amount"].set(0)
+            for ctype in ["fish","treasure"]:
+                for rar in RARITY_COLORS.keys():
+                    if f"{rar}_{ctype}" not in LOOT_TYPE_BLACKLIST:
+                        GUI.Vars[f"{rar}_{ctype}"].set(0)
             GUI.thread = FishBotThread()
             GUI.toggleButton(False)
         else:
@@ -290,7 +309,6 @@ try to re-switch tool.
 
     @staticmethod
     def __charBinding(var, index, mode):
-        print("changed")
         value = GUI.Vars[var].get()
         if len(value) > 1:
             GUI.Vars[var].set(value[1])
@@ -300,12 +318,10 @@ try to re-switch tool.
 
     @staticmethod
     def __baitCheckBox(*args):
-        if GUI.Vars["settings_use_baits"].get() == "1":
-            for option in ["settings_bait1_key","settings_bait2_key"]:
-                GUI.Elems[option]["state"] = "normal"
-        else:
-            for option in ["settings_bait1_key","settings_bait2_key"]:
-                GUI.Elems[option]["state"] = "disabled"
+        for i in range(1,3):
+            GUI.Elems[f"settings_bait{i}_key"]["state"] = "normal" \
+                if GUI.Vars[f"settings_use_bait{i}"].get() == "1" \
+                else "disabled"
 
     @staticmethod
     def __regVar(name, defaultval, writeCallback = None):
