@@ -1,12 +1,13 @@
 import os
 import sys
 import pyautogui
-import pyglet
+from tkextrafont import Font
 from idlelib.tooltip import Hovertip
 from threading import Thread, Event
-from tkinter import Tk, Label, LabelFrame, Entry, Button, Variable, Checkbutton
+from tkinter import Tk, Label, LabelFrame, Entry, Button, Variable, Checkbutton, font
 from datetime import datetime, timedelta
-from pynput.keyboard import Controller as Keyboard, Listener, Key
+from pynput.keyboard import Listener, Key
+import autoit
 
 LINE_COLOR: tuple[int, int, int] = (255, 105, 105)
 FISH_COLOR: tuple[int, int, int] = (255, 255, 255)
@@ -19,7 +20,7 @@ RARITY_COLORS = {
     "legendary": (139, 144, 27),
 }
 
-LOOT_TYPE_BLACKLIST = ["legendary_fish","common_treasure","mythic_treasure"]
+LOOT_TYPE_BLACKLIST = ["common_treasure","mythic_treasure"]
 
 class FishBotScanData:
     def __init__(self, line: int | None, catch: int | None, catchtype: str | None, rarity: str | None):
@@ -77,7 +78,7 @@ class FishBotThread(Thread):
             return False
         for y in range(ly, s.height):
             if s.getpixel((lx, y)) != LINE_COLOR:
-                linemiddle = ly + (y - ly) // 2.7
+                linemiddle = int(ly + (y - ly) // 2.7)
                 break
         for x in range(lx, s.width):
             if s.getpixel((x, ly)) == (255, 255, 255):
@@ -100,32 +101,33 @@ class FishBotThread(Thread):
     @staticmethod
     def __castRod() -> None:
         pyautogui.sleep(0.3)
-        pyautogui.mouseDown()
+        autoit.mouse_down()
         pyautogui.sleep(0.3)
-        pyautogui.mouseUp()
+        autoit.mouse_up()
         pyautogui.sleep(1.5)
 
     @staticmethod
     def __castRodAgain() -> None:
-        for index in range(2):
+        for _ in range(2):
             pyautogui.sleep(0.5)
-            Keyboard().tap(GUI.Vars["settings_rod_key"].get())
+            autoit.send(GUI.Vars["settings_rod_key"].get())
         FishBotThread.__castRod()
 
     def __preventAFKKick(self,toggler) -> None:
-        pyautogui.moveTo(x=self._region[0] if toggler else self._region[0] + self._region[2], y=self._region[1], duration=1,
-                         tween=pyautogui.easeOutQuad)
+        autoit.mouse_move(
+            x=self._region[0] if toggler else self._region[0] + self._region[2], 
+            y=self._region[1],
+        )
         pyautogui.sleep(0.1)
 
     @staticmethod
     def __useBait(baitType):
-        kboard = Keyboard()
-        kboard.tap(GUI.Vars[f"settings_bait{baitType}_key"].get())
-        pyautogui.mouseDown()
-        pyautogui.sleep(1)
-        pyautogui.mouseUp()
+        autoit.send(GUI.Vars[f"settings_bait{baitType}_key"].get())
+        autoit.mouse_down()
+        pyautogui.sleep(1.5)
+        autoit.mouse_up()
         pyautogui.sleep(0.2)
-        kboard.tap(GUI.Vars["settings_rod_key"].get())
+        autoit.send(GUI.Vars["settings_rod_key"].get())
 
     def __run(self) -> None:
         def updateStatus(value):
@@ -146,7 +148,7 @@ class FishBotThread(Thread):
                 GUI.toggleButton(True)
                 return
         updateTime(datetime.now())
-        pyautogui.moveTo(self._region[0], self._region[1])
+        autoit.mouse_move(self._region[0], self._region[1])
         lastTriggerTime,lastBaitTime = datetime.now(),(datetime.now()-timedelta(minutes=2))
         while True:
             if self.isTerminated(): return
@@ -162,12 +164,13 @@ class FishBotThread(Thread):
                     if data.line is None:
                         break
                     elif data.catch is not None and data.line < data.catch:
-                        pyautogui.mouseDown()
+                        autoit.mouse_down()
                     else:
-                        pyautogui.mouseUp()
-                pyautogui.mouseUp()
+                        autoit.mouse_up()
+                autoit.mouse_up()
                 GUI.Vars["total_catch_amount"].set(GUI.Vars["total_catch_amount"].get() + 1)
-                GUI.Vars[f"{sR}_{sCt}"].set(GUI.Vars[f"{sR}_{sCt}"].get() + 1)
+                if f"{sR}_{sCt}" in GUI.Vars.keys():
+                    GUI.Vars[f"{sR}_{sCt}"].set(GUI.Vars[f"{sR}_{sCt}"].get() + 1)
                 updateStatus("Preventick AFK-Kick...")
                 if self.isTerminated(): return
                 self.__preventAFKKick(GUI.Vars["total_catch_amount"].get() % 2 == 0)
@@ -208,10 +211,10 @@ class GUI:
         win.iconbitmap(GUI.__resourcePath("icon.ico"))
         win.minsize(400, 730)
 
-        titleFont = "HirukoPro-Black"
+        titleFont = "Hiruko Pro"
         textFont = "Magdelin Text"
-        pyglet.font.add_file(f"{titleFont}.otf")
-        pyglet.font.add_file("Magdelin Text.otf")
+        for font in [titleFont, textFont]:
+            Font(file=os.path.join("fonts",f"{font}.otf"), family = font)
 
         Label(win,text="FishBot",bg="#FEFEFD",font=(titleFont, 50)).pack()
         Label(win,text="Made by Kr4zyM4nJ",bg="#FEFEFD",font=(textFont, 15)).pack(pady=(0, 10))
@@ -375,7 +378,7 @@ interval of 2 minutes (this is how long Tier {data[0]} bait lasts).
         return os.path.join(base_path, relative_path)
 
     @staticmethod
-    def __charBinding(var, index, mode):
+    def __charBinding(var):
         value = GUI.Vars[var].get()
         if len(value) > 1:
             GUI.Vars[var].set(value[1])
@@ -384,7 +387,7 @@ interval of 2 minutes (this is how long Tier {data[0]} bait lasts).
             GUI.Vars[var].set(GUI.optionBefore)
 
     @staticmethod
-    def __baitCheckBox(*args):
+    def __baitCheckBox():
         for i in range(1,3):
             GUI.Elems[f"settings_bait{i}_key"]["state"] = "normal" \
                 if GUI.Vars[f"settings_use_bait{i}"].get() == "1" \
