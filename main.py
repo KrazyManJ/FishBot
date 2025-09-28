@@ -16,8 +16,8 @@ RARITY_COLORS = {
     "common": (113, 116, 121),
     "uncommon": (33, 131, 36),
     "rare": (39, 89, 142),
-    "mythic": (138, 55, 131),
     "legendary": (139, 144, 27),
+    "mythic": (138, 55, 131),
 }
 
 LOOT_TYPE_BLACKLIST = ["common_treasure","mythic_treasure"]
@@ -378,7 +378,7 @@ interval of 2 minutes (this is how long Tier {data[0]} bait lasts).
         return os.path.join(base_path, relative_path)
 
     @staticmethod
-    def __charBinding(var):
+    def __charBinding(var, *args):
         value = GUI.Vars[var].get()
         if len(value) > 1:
             GUI.Vars[var].set(value[1])
@@ -387,7 +387,7 @@ interval of 2 minutes (this is how long Tier {data[0]} bait lasts).
             GUI.Vars[var].set(GUI.optionBefore)
 
     @staticmethod
-    def __baitCheckBox():
+    def __baitCheckBox(*args):
         for i in range(1,3):
             GUI.Elems[f"settings_bait{i}_key"]["state"] = "normal" \
                 if GUI.Vars[f"settings_use_bait{i}"].get() == "1" \
