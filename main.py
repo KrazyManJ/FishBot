@@ -22,6 +22,14 @@ RARITY_COLORS = {
 
 LOOT_TYPE_BLACKLIST = ["common_treasure","mythic_treasure"]
 
+def resource_path(relative_path):
+    try:
+        base_path = sys._MEIPASS
+    except Exception:
+        base_path = os.path.abspath(".")
+
+    return os.path.join(base_path, relative_path)
+
 class FishBotScanData:
     def __init__(self, line: int | None, catch: int | None, catchtype: str | None, rarity: str | None):
         self.line = line
@@ -208,13 +216,13 @@ class GUI:
         win.title("FishBot")
         win.geometry("400x730")
         #win.geometry(f"425x{pyautogui.size().height - 75}+{pyautogui.size().width - 425}+0")
-        win.iconbitmap(GUI.__resourcePath("icon.ico"))
+        win.iconbitmap(resource_path("icon.ico"))
         win.minsize(400, 730)
 
         titleFont = "Hiruko Pro"
         textFont = "Magdelin Text"
         for font in [titleFont, textFont]:
-            Font(file=os.path.join("fonts",f"{font}.otf"), family = font)
+            Font(file=resource_path(os.path.join("fonts",f"{font}.otf")), family = font)
 
         Label(win,text="FishBot",bg="#FEFEFD",font=(titleFont, 50)).pack()
         Label(win,text="Made by Kr4zyM4nJ",bg="#FEFEFD",font=(textFont, 15)).pack(pady=(0, 10))
@@ -368,14 +376,6 @@ interval of 2 minutes (this is how long Tier {data[0]} bait lasts).
             GUI.thread.terminate()
             GUI.toggleButton(True)
             GUI.Vars["status"].set("Script stopped!")
-
-    @staticmethod
-    def __resourcePath(relative_path):
-        try:
-            base_path = sys._MEIPASS
-        except:
-            base_path = os.path.abspath(".")
-        return os.path.join(base_path, relative_path)
 
     @staticmethod
     def __charBinding(var, *args):
