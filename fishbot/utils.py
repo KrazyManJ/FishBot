@@ -8,3 +8,6 @@ def resource_path(relative_path):
         base_path = os.path.abspath(".")
 
     return os.path.join(base_path, relative_path)
+
+def dict_key_from_value(dict: dict, val):
+    return (list(dict.keys())[list(dict.values()).index(val)])

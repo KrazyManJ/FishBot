@@ -1,5 +1,7 @@
+WHITE_COLOR: tuple[int, int, int] = (255, 255, 255)
+
 LINE_COLOR: tuple[int, int, int] = (255, 105, 105)
-FISH_COLOR: tuple[int, int, int] = (255, 255, 255)
+FISH_COLOR: tuple[int, int, int] = WHITE_COLOR
 
 RARITY_COLORS = {
     "common": (113, 116, 121),
@@ -10,3 +12,9 @@ RARITY_COLORS = {
 }
 
 LOOT_TYPE_BLACKLIST = ["common_treasure","mythic_treasure"]
+
+CANCEL_CALIBRATION_AFTER_UNSUCCESS_SECONDS = 30
+
+BAIT_EFFECT_DURATION_SECONDS = 120
+
+ATTEMPT_RECAST_AFTER_SECONDS = 30

@@ -1,6 +1,7 @@
 from threading import Thread, Event
-from .model import FishBotScanData
+from .model import FishBotScanData, OnCatchProtocol
 from .constants import *
+from .utils import dict_key_from_value
 import pyautogui
 import autoit
 from datetime import datetime, timedelta
@@ -8,22 +9,46 @@ from typing import Callable
 
 class FishBotThread(Thread):
 
-    def __init__(self, update_status: Callable[[str], None]):
+    def __init__(self,
+        rod_key: str,
+        use_bait1: bool,
+        bait1_key: str,
+        use_bait2: bool,
+        bait2_key: str,
+        
+        update_status: Callable[[str], None],
+        start_timer: Callable[[], None],
+        on_catch: OnCatchProtocol,
+        on_terminate: Callable[[], None]
+    ):
         super(FishBotThread, self).__init__(target=self.__run, daemon=True)
+
+        self.rod_key = rod_key
+
+        self.use_bait1 = use_bait1
+        self.bait1_key = bait1_key
+
+        self.use_bait2 = use_bait2
+        self.bait2_key = bait2_key
+
+        self.update_status = update_status
+        self.start_timer = start_timer
+        self.on_catch = on_catch
+        self.on_terminate = on_terminate
 
         self._stop_event = Event()
         self._region: tuple[int, int, int, int] | None = None
-        self.update_status = update_status
 
         self.start()
 
     def terminate(self) -> None:
         self._stop_event.set()
+        self.on_terminate()
 
-    def isTerminated(self) -> bool:
+    def is_terminated(self) -> bool:
         return self._stop_event.is_set()
 
-    def __scanData(self,includeLootData) -> FishBotScanData:
+    def __scan_data(self,includeLootData) -> FishBotScanData:
         line, c, ct, r = None, None, None, "unknown"
         pic = pyautogui.screenshot(region=self._region)
         for x in range(0, pic.width):
@@ -38,7 +63,7 @@ class FishBotThread(Thread):
                         for bc in range(x,line,-1):
                             col = pic.getpixel((bc,0))
                             if col in RARITY_COLORS.values():
-                                r = (list(RARITY_COLORS.keys())[list(RARITY_COLORS.values()).index(col)])
+                                r = dict_key_from_value(RARITY_COLORS, col)
             if c is not None and line is not None:
                 break
         return FishBotScanData(line, c, ct, r)
@@ -60,107 +85,93 @@ class FishBotThread(Thread):
                 linemiddle = int(ly + (y - ly) // 2.7)
                 break
         for x in range(lx, s.width):
-            if s.getpixel((x, ly)) == (255, 255, 255):
+            if s.getpixel((x, ly)) == WHITE_COLOR:
                 self._region = (lx, linemiddle, x - lx, 1)
                 break
         return self._region is not None
 
-    @staticmethod
-    def __castRod() -> None:
+    def __cast_rod(self) -> None:
         pyautogui.sleep(0.3)
         autoit.mouse_down()
         pyautogui.sleep(0.3)
         autoit.mouse_up()
         pyautogui.sleep(1.5)
 
-    @staticmethod
-    def __castRodAgain() -> None:
-        from .gui import GUI
+    def __re_cast_rod(self):
         for _ in range(2):
             pyautogui.sleep(0.5)
-            autoit.send(GUI.Vars["settings_rod_key"].get())
-        FishBotThread.__castRod()
+            autoit.send(self.rod_key)
+        self.__cast_rod()
 
-    def __preventAFKKick(self,toggler) -> None:
+    def __move_mouse_to_catch_bar_side(self,toggler) -> None:
         autoit.mouse_move(
             x=self._region[0] if toggler else self._region[0] + self._region[2], 
             y=self._region[1],
         )
         pyautogui.sleep(0.1)
 
-    @staticmethod
-    def __useBait(baitType):
-        from .gui import GUI
-        autoit.send(GUI.Vars[f"settings_bait{baitType}_key"].get())
+    def __use_bait(self, bait_type):
+        self.update_status(f"Using tier {bait_type} bait...")
+        bait_key = self.bait1_key if bait_type == 1 else self.bait2_key
+
+        autoit.send(bait_key)
         autoit.mouse_down()
         pyautogui.sleep(1.5)
         autoit.mouse_up()
         pyautogui.sleep(0.2)
-        autoit.send(GUI.Vars["settings_rod_key"].get())
-
-    def __start_timer(self):
-        from .gui import GUI
-        def __update_time(start):
-            if self.is_alive():
-                s = (datetime.now() - start).seconds
-                GUI.Vars["time_elapsed"].set('{:02}h {:02}m {:02}s'.format(s // 3600, s % 3600 // 60, s % 60))
-                GUI.win.after(1000, lambda: __update_time(start))
-        __update_time(datetime.now())
-
+        autoit.send(self.rod_key)
 
     def __run(self) -> None:
-        from .gui import GUI
-        
         self.update_status("Waiting for first catch to appear for calibration...")
-        calibrationStart = datetime.now()
+        calibration_start = datetime.now()
         while not self.__calibrate():
-            if self.isTerminated(): return
-            if (datetime.now() - calibrationStart).total_seconds() >= 30:
+            if self.is_terminated(): return
+            if (datetime.now() - calibration_start).total_seconds() >= CANCEL_CALIBRATION_AFTER_UNSUCCESS_SECONDS:
                 self.update_status("Error: Could not calibrate because bar was not found, script stopped!")
-                GUI.toggleButton(True)
+                self.terminate()
                 return
-        self.__start_timer()
+        self.start_timer()
         autoit.mouse_move(self._region[0], self._region[1])
-        lastTriggerTime,lastBaitTime = datetime.now(),(datetime.now()-timedelta(minutes=2))
+        last_catch_trigger_time, last_bait_usage_time = datetime.now(),(datetime.now()-timedelta(minutes=2))
+        cursor_afk_side = False
         while True:
-            if self.isTerminated(): return
+            if self.is_terminated(): return
             self.update_status("Waiting for another fish...")
-            data = self.__scanData(True)
-            sR, sCt = data.rarity, data.catchtype
-            if (data.line, data.catch) != (None, None):
-                self.update_status(f"Fishing {data.rarity} {data.catchtype}...")
-                lastTriggerTime = datetime.now()
+            data = self.__scan_data(True)
+            sR, sCt = data.catch_rarity, data.catch_type
+            if (data.red_line_x, data.catch_area_x) != (None, None):
+                self.update_status(f"Fishing {data.catch_rarity} {data.catch_type}...")
+                last_catch_trigger_time = datetime.now()
                 while True:
-                    if self.isTerminated(): return
-                    data = self.__scanData(False)
-                    if data.line is None:
+                    if self.is_terminated(): return
+                    data = self.__scan_data(False)
+                    if data.red_line_x is None:
                         break
-                    elif data.catch is not None and data.line < data.catch:
+                    elif data.catch_area_x is not None and data.red_line_x < data.catch_area_x:
                         autoit.mouse_down()
                     else:
                         autoit.mouse_up()
                 autoit.mouse_up()
-                GUI.Vars["total_catch_amount"].set(GUI.Vars["total_catch_amount"].get() + 1)
-                if f"{sR}_{sCt}" in GUI.Vars.keys():
-                    GUI.Vars[f"{sR}_{sCt}"].set(GUI.Vars[f"{sR}_{sCt}"].get() + 1)
+                self.on_catch(sCt, sR)
                 self.update_status("Preventick AFK-Kick...")
-                if self.isTerminated(): return
-                self.__preventAFKKick(GUI.Vars["total_catch_amount"].get() % 2 == 0)
-                if self.isTerminated(): return
-                if GUI.Vars["settings_use_bait1"].get() == "1" or GUI.Vars["settings_use_bait2"].get() == "1":
-                    if (datetime.now() - lastBaitTime).total_seconds() >= 120:
-                        for i in range(1,3):
-                            if GUI.Vars[f"settings_use_bait{i}"].get() == "1":
-                                self.update_status(f"Using tier {i} bait...")
-                                FishBotThread.__useBait(i)
-                            if self.isTerminated(): return
-                        lastBaitTime = datetime.now()
+                if self.is_terminated(): return
+                self.__move_mouse_to_catch_bar_side(cursor_afk_side := not cursor_afk_side)
+                if self.is_terminated(): return
+                if self.use_bait1 or self.use_bait2:
+                    if (datetime.now() - last_bait_usage_time).total_seconds() >= BAIT_EFFECT_DURATION_SECONDS:
+                        if self.use_bait1:
+                            self.__use_bait(1)
+                        if self.is_terminated(): return
+                        if self.use_bait2:
+                            self.__use_bait(2)
+                        if self.is_terminated(): return
+                        last_bait_usage_time = datetime.now()
                 self.update_status("Casting fishing rod...")
-                self.__castRod()
-                if self.isTerminated(): return
+                self.__cast_rod()
+                if self.is_terminated(): return
                 pyautogui.sleep(1)
-            if (datetime.now() - lastTriggerTime).total_seconds() >= 30:
-                lastTriggerTime = datetime.now()
+            if (datetime.now() - last_catch_trigger_time).total_seconds() >= ATTEMPT_RECAST_AFTER_SECONDS:
+                last_catch_trigger_time = datetime.now()
                 self.update_status("No fish for a long time, casting fishing rod again...")
-                self.__castRodAgain()
+                self.__re_cast_rod()
             pyautogui.sleep(0.1)

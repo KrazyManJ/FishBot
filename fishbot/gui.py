@@ -6,6 +6,7 @@ import os
 from idlelib.tooltip import Hovertip
 from .constants import *
 from pynput.keyboard import Key, Listener
+from datetime import datetime
 
 class GUI:
 
@@ -168,7 +169,24 @@ interval of 2 minutes (this is how long Tier {data[0]} bait lasts).
 
     @staticmethod
     def __update_status(status):
+        print(status)
         GUI.Vars["status"].set(status)
+
+    @staticmethod
+    def __start_timer():
+        from .gui import GUI
+        def __update_time(start):
+            if not GUI.thread.is_terminated():
+                s = (datetime.now() - start).seconds
+                GUI.Vars["time_elapsed"].set('{:02}h {:02}m {:02}s'.format(s // 3600, s % 3600 // 60, s % 60))
+                GUI.win.after(1000, lambda: __update_time(start))
+        __update_time(datetime.now())
+
+    @staticmethod
+    def on_catch(catch_type, catch_rarity):
+        GUI.Vars["total_catch_amount"].set(GUI.Vars["total_catch_amount"].get() + 1)
+        if f"{catch_rarity}_{catch_type}" in GUI.Vars.keys():
+            GUI.Vars[f"{catch_rarity}_{catch_type}"].set(GUI.Vars[f"{catch_rarity}_{catch_type}"].get() + 1)
 
     @staticmethod
     def __btnClick():
@@ -179,7 +197,17 @@ interval of 2 minutes (this is how long Tier {data[0]} bait lasts).
                     if f"{rar}_{ctype}" not in LOOT_TYPE_BLACKLIST:
                         GUI.Vars[f"{rar}_{ctype}"].set(0)
             GUI.thread = FishBotThread(
-                update_status=GUI.__update_status
+                rod_key=GUI.Vars["settings_rod_key"].get(),
+                
+                use_bait1=GUI.Vars["settings_use_bait1"].get() == "1",
+                bait1_key=GUI.Vars[f"settings_bait1_key"].get(),
+                use_bait2=GUI.Vars["settings_use_bait2"].get() == "1",
+                bait2_key=GUI.Vars[f"settings_bait2_key"].get(),
+
+                update_status=GUI.__update_status,
+                start_timer=GUI.__start_timer,
+                on_catch=GUI.on_catch,
+                on_terminate=lambda: GUI.toggleButton(True)
             )
             GUI.toggleButton(False)
         else:
