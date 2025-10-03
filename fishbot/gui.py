@@ -20,7 +20,6 @@ class GUI:
         win.configure(background="#FEFEFD")
         win.title("FishBot")
         win.geometry("400x730")
-        #win.geometry(f"425x{pyautogui.size().height - 75}+{pyautogui.size().width - 425}+0")
         win.iconbitmap(resource_path("icon.ico"))
         win.minsize(400, 730)
 
@@ -168,6 +167,10 @@ interval of 2 minutes (this is how long Tier {data[0]} bait lasts).
                 GUI.Vars["status"].set("Script stopped!")
 
     @staticmethod
+    def __update_status(status):
+        GUI.Vars["status"].set(status)
+
+    @staticmethod
     def __btnClick():
         if GUI.thread is None or not GUI.thread.is_alive():
             GUI.Vars["total_catch_amount"].set(0)
@@ -175,7 +178,9 @@ interval of 2 minutes (this is how long Tier {data[0]} bait lasts).
                 for rar in RARITY_COLORS.keys():
                     if f"{rar}_{ctype}" not in LOOT_TYPE_BLACKLIST:
                         GUI.Vars[f"{rar}_{ctype}"].set(0)
-            GUI.thread = FishBotThread()
+            GUI.thread = FishBotThread(
+                update_status=GUI.__update_status
+            )
             GUI.toggleButton(False)
         else:
             GUI.thread.terminate()

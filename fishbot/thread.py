@@ -4,13 +4,17 @@ from .constants import *
 import pyautogui
 import autoit
 from datetime import datetime, timedelta
+from typing import Callable
 
 class FishBotThread(Thread):
 
-    def __init__(self):
+    def __init__(self, update_status: Callable[[str], None]):
         super(FishBotThread, self).__init__(target=self.__run, daemon=True)
+
         self._stop_event = Event()
         self._region: tuple[int, int, int, int] | None = None
+        self.update_status = update_status
+
         self.start()
 
     def terminate(self) -> None:
@@ -94,35 +98,37 @@ class FishBotThread(Thread):
         pyautogui.sleep(0.2)
         autoit.send(GUI.Vars["settings_rod_key"].get())
 
-    def __run(self) -> None:
+    def __start_timer(self):
         from .gui import GUI
-        def updateStatus(value):
-            if not self.isTerminated(): GUI.Vars["status"].set(value)
-
-        def updateTime(start):
+        def __update_time(start):
             if self.is_alive():
                 s = (datetime.now() - start).seconds
                 GUI.Vars["time_elapsed"].set('{:02}h {:02}m {:02}s'.format(s // 3600, s % 3600 // 60, s % 60))
-                GUI.win.after(1000, lambda: updateTime(start))
+                GUI.win.after(1000, lambda: __update_time(start))
+        __update_time(datetime.now())
 
-        updateStatus("Waiting for first catch to appear for calibration...")
+
+    def __run(self) -> None:
+        from .gui import GUI
+        
+        self.update_status("Waiting for first catch to appear for calibration...")
         calibrationStart = datetime.now()
         while not self.__calibrate():
             if self.isTerminated(): return
             if (datetime.now() - calibrationStart).total_seconds() >= 30:
-                updateStatus("Error: Could not calibrate because bar was not found, script stopped!")
+                self.update_status("Error: Could not calibrate because bar was not found, script stopped!")
                 GUI.toggleButton(True)
                 return
-        updateTime(datetime.now())
+        self.__start_timer()
         autoit.mouse_move(self._region[0], self._region[1])
         lastTriggerTime,lastBaitTime = datetime.now(),(datetime.now()-timedelta(minutes=2))
         while True:
             if self.isTerminated(): return
-            updateStatus("Waiting for another fish...")
+            self.update_status("Waiting for another fish...")
             data = self.__scanData(True)
             sR, sCt = data.rarity, data.catchtype
             if (data.line, data.catch) != (None, None):
-                updateStatus(f"Fishing {data.rarity} {data.catchtype}...")
+                self.update_status(f"Fishing {data.rarity} {data.catchtype}...")
                 lastTriggerTime = datetime.now()
                 while True:
                     if self.isTerminated(): return
@@ -137,7 +143,7 @@ class FishBotThread(Thread):
                 GUI.Vars["total_catch_amount"].set(GUI.Vars["total_catch_amount"].get() + 1)
                 if f"{sR}_{sCt}" in GUI.Vars.keys():
                     GUI.Vars[f"{sR}_{sCt}"].set(GUI.Vars[f"{sR}_{sCt}"].get() + 1)
-                updateStatus("Preventick AFK-Kick...")
+                self.update_status("Preventick AFK-Kick...")
                 if self.isTerminated(): return
                 self.__preventAFKKick(GUI.Vars["total_catch_amount"].get() % 2 == 0)
                 if self.isTerminated(): return
@@ -145,15 +151,16 @@ class FishBotThread(Thread):
                     if (datetime.now() - lastBaitTime).total_seconds() >= 120:
                         for i in range(1,3):
                             if GUI.Vars[f"settings_use_bait{i}"].get() == "1":
-                                updateStatus(f"Using tier {i} bait...")
+                                self.update_status(f"Using tier {i} bait...")
                                 FishBotThread.__useBait(i)
                             if self.isTerminated(): return
                         lastBaitTime = datetime.now()
-                updateStatus("Casting fishing rod...")
+                self.update_status("Casting fishing rod...")
                 self.__castRod()
                 if self.isTerminated(): return
+                pyautogui.sleep(1)
             if (datetime.now() - lastTriggerTime).total_seconds() >= 30:
                 lastTriggerTime = datetime.now()
-                updateStatus("No fish for a long time, casting fishing rod again...")
+                self.update_status("No fish for a long time, casting fishing rod again...")
                 self.__castRodAgain()
             pyautogui.sleep(0.1)
