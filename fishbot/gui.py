@@ -20,7 +20,7 @@ class GUI:
         win = GUI.win
         win.configure(background="#FEFEFD")
         win.title("FishBot")
-        win.geometry("400x730")
+        win.geometry("400x760")
         win.iconbitmap(resource_path("icon.ico"))
         win.minsize(400, 730)
 
@@ -169,7 +169,6 @@ interval of 2 minutes (this is how long Tier {data[0]} bait lasts).
 
     @staticmethod
     def __update_status(status):
-        print(status)
         GUI.Vars["status"].set(status)
 
     @staticmethod
